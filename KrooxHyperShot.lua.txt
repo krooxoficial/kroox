@@ -1,0 +1,161 @@
+task.spawn(function()
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local UserInputService = game:GetService("UserInputService")
+    local LocalPlayer = Players.LocalPlayer
+    local Camera = workspace.CurrentCamera
+
+    local Settings = {
+        ESP = false,
+        Aimlock = false,
+        AimKey = Enum.KeyCode.LeftAlt,
+        ColorCeleste = Color3.fromRGB(0, 255, 255),
+        FOVRadius = 60, -- Radio ajustado a 60
+        FOVVisible = true,
+        MenuVisible = true
+    }
+
+    local CurrentTarget = nil
+
+    -- // CORRECCIÓN CÍRCULO DE FOV (Drawing API)
+    local FOVCircle = Drawing.new("Circle")
+    FOVCircle.Visible = false
+    FOVCircle.Thickness = 1.5
+    FOVCircle.Radius = Settings.FOVRadius
+    FOVCircle.Transparency = 1
+    FOVCircle.Color = Settings.ColorCeleste
+    FOVCircle.Filled = false
+
+    -- // INTERFAZ
+    local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
+    ScreenGui.Name = "FinalSystem"
+    ScreenGui.ResetOnSpawn = false
+
+    local MainFrame = Instance.new("Frame", ScreenGui)
+    MainFrame.Size = UDim2.new(0, 160, 0, 150)
+    MainFrame.Position = UDim2.new(0.05, 0, 0.4, 0)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    MainFrame.BorderColor3 = Settings.ColorCeleste
+    MainFrame.BorderSizePixel = 1
+
+    local function CreateToggle(text, yPos, callback)
+        local btn = Instance.new("TextButton", MainFrame)
+        btn.Size = UDim2.new(0.9, 0, 0, 35)
+        btn.Position = UDim2.new(0.05, 0, 0, yPos)
+        btn.Text = text
+        btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+        btn.TextColor3 = Color3.new(1, 1, 1)
+        btn.Font = Enum.Font.SourceSansBold
+        btn.TextSize = 14
+        btn.MouseButton1Click:Connect(callback)
+        return btn
+    end
+
+    local eBtn = CreateToggle("ESP: OFF", 10, function() Settings.ESP = not Settings.ESP end)
+    local aBtn = CreateToggle("LOCK: OFF", 55, function() Settings.Aimlock = not Settings.Aimlock end)
+    local fBtn = CreateToggle("FOV: ON", 100, function() Settings.FOVVisible = not Settings.FOVVisible end)
+
+    -- // CONTROL DE MENÚ CON INSERT
+    UserInputService.InputBegan:Connect(function(input, processed)
+        if input.KeyCode == Enum.KeyCode.Insert then
+            Settings.MenuVisible = not Settings.MenuVisible
+            MainFrame.Visible = Settings.MenuVisible
+        end
+    end)
+
+    -- // FILTROS
+    local function esObjetivoValido(modelo)
+        if not modelo or not modelo:IsA("Model") or modelo == LocalPlayer.Character then return false end
+        local n = modelo.Name:lower()
+        if n:find("botring") or n:find("viewmodel") or n:find("arm") then return false end
+        
+        local torso = modelo:FindFirstChild("UpperBuddy") or modelo:FindFirstChild("Head")
+        if torso then
+            local p = torso:IsA("BasePart") and torso or torso:FindFirstChildWhichIsA("BasePart", true)
+            if p and (p.Position - Camera.CFrame.Position).Magnitude > 7 then
+                return p
+            end
+        end
+        return nil
+    end
+
+    local function getClosestToMouse()
+        local target = nil
+        local closest = Settings.FOVRadius
+        local mousePos = UserInputService:GetMouseLocation()
+
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v:IsA("Model") then
+                local p = esObjetivoValido(v)
+                if p then
+                    local pos, vis = Camera:WorldToViewportPoint(p.Position)
+                    if vis then
+                        local mag = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+                        if mag < closest then
+                            closest = mag
+                            target = p
+                        end
+                    end
+                end
+            end
+        end
+        return target
+    end
+
+    -- // BUCLE PRINCIPAL
+    RunService.RenderStepped:Connect(function()
+        -- Actualizar Botones Visuales
+        eBtn.TextColor3 = Settings.ESP and Settings.ColorCeleste or Color3.new(1, 1, 1)
+        aBtn.TextColor3 = Settings.Aimlock and Settings.ColorCeleste or Color3.new(1, 1, 1)
+        fBtn.TextColor3 = Settings.FOVVisible and Settings.ColorCeleste or Color3.new(1, 1, 1)
+
+        -- Actualizar FOV Circle (Posición y Visibilidad)
+        FOVCircle.Visible = Settings.FOVVisible and Settings.Aimlock
+        FOVCircle.Position = UserInputService:GetMouseLocation()
+        FOVCircle.Radius = Settings.FOVRadius
+
+        -- ESP Lógica (Celeste)
+        if Settings.ESP then
+            for _, v in pairs(workspace:GetDescendants()) do
+                if v:IsA("Model") then
+                    local p = esObjetivoValido(v)
+                    if p and not v:FindFirstChild("CelesteTag") then
+                        local tag = Instance.new("BillboardGui", v)
+                        tag.Name = "CelesteTag"
+                        tag.Size = UDim2.new(0, 80, 0, 20)
+                        tag.AlwaysOnTop = true
+                        tag.StudsOffset = Vector3.new(0, 3, 0)
+                        local tl = Instance.new("TextLabel", tag)
+                        tl.Size = UDim2.new(1, 0, 1, 0)
+                        tl.BackgroundTransparency = 1
+                        tl.TextColor3 = Settings.ColorCeleste
+                        tl.TextStrokeTransparency = 0.5
+                        tl.Text = v.Name
+                        tl.Font = Enum.Font.SourceSansBold
+                        tl.TextSize = 10
+                    end
+                end
+            end
+        else
+            for _, v in pairs(workspace:GetDescendants()) do
+                local tag = v:FindFirstChild("CelesteTag")
+                if tag then tag:Destroy() end
+            end
+        end
+
+        -- LÓGICA DE STICKY LOCK
+        if Settings.Aimlock and UserInputService:IsKeyDown(Settings.AimKey) then
+            if not CurrentTarget then
+                CurrentTarget = getClosestToMouse()
+            end
+
+            if CurrentTarget and CurrentTarget.Parent then
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, CurrentTarget.Position)
+            else
+                CurrentTarget = nil
+            end
+        else
+            CurrentTarget = nil
+        end
+    end)
+end)
